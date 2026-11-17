@@ -1,0 +1,249 @@
+<!doctype html>
+<html lang="fr"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Stock Boutique</title>
+<link rel="manifest" href="manifest.webmanifest"><meta name="theme-color" content="#0f766e"><link rel="icon" href="icon-192.png"><link rel="apple-touch-icon" href="icon-192.png">
+<style>
+:root{--bg:#f4f5f7;--card:#fff;--tx:#1c1e21;--mu:#6b7280;--pr:#0f766e;--rd:#b91c1c;--bd:#e5e7eb}
+@media(prefers-color-scheme:dark){:root{--bg:#111315;--card:#1b1e21;--tx:#eceff1;--mu:#9aa3ab;--pr:#2dd4bf;--rd:#f87171;--bd:#2c3136}}
+*{box-sizing:border-box}
+body{margin:0;font-family:system-ui,sans-serif;background:var(--bg);color:var(--tx);padding:12px 12px 84px;max-width:560px;margin:auto}
+h2{font-size:1.05rem;margin:18px 0 8px}
+.card{background:var(--card);border:1px solid var(--bd);border-radius:12px;padding:12px;margin-bottom:10px}
+.grid{display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:6px}
+.k{background:var(--card);border:1px solid var(--bd);border-radius:12px;padding:10px}
+.k small{color:var(--mu);display:block}.k b{font-size:1.15rem}
+.it{display:flex;justify-content:space-between;align-items:center;gap:8px;background:var(--card);border:1px solid var(--bd);border-radius:10px;padding:10px;margin-bottom:6px}
+.it.sel{border-color:var(--pr);box-shadow:0 0 0 2px var(--pr)}.it.off{opacity:.5}
+.it span{font-weight:700;white-space:nowrap}
+label{display:block;font-size:.85rem;color:var(--mu);margin:10px 0 4px}
+input,select{width:100%;font-size:1.05rem;padding:12px;border:1px solid var(--bd);border-radius:10px;background:var(--bg);color:var(--tx)}
+.row{display:grid;grid-template-columns:1fr 1fr;gap:8px}
+.btn{width:100%;margin-top:12px;padding:14px;font-size:1.05rem;font-weight:700;border:0;border-radius:10px;background:var(--pr);color:#fff}
+.btn.alt{background:transparent;color:var(--pr);border:1px solid var(--pr);margin-top:8px}
+.x{border:1px solid var(--rd);color:var(--rd);background:transparent;border-radius:8px;padding:6px 10px}
+.mu{color:var(--mu)}.rd{color:var(--rd)}small{font-size:.8rem}
+nav{position:fixed;left:0;right:0;bottom:0;display:flex;background:var(--card);border-top:1px solid var(--bd)}
+nav button{flex:1;border:0;background:none;padding:8px 0 10px;font-size:.75rem;color:var(--mu)}
+nav button.on{color:var(--pr);font-weight:700}
+#toast{position:fixed;left:50%;bottom:80px;transform:translateX(-50%);background:#111;color:#fff;padding:10px 16px;border-radius:20px;opacity:0;transition:.25s;pointer-events:none;max-width:90%}
+#toast.on{opacity:1}
+</style></head><body>
+<div id="v"></div><div id="toast"></div>
+<nav>
+<button data-t="home" onclick="go('home')">📊<br>Accueil</button>
+<button data-t="buy" onclick="go('buy')">📥<br>Achat</button>
+<button data-t="sell" onclick="go('sell')">💰<br>Vente</button>
+<button data-t="stock" onclick="go('stock')">📦<br>Stock</button>
+<button data-t="more" onclick="go('more')">⚙️<br>Plus</button>
+</nav>
+<script>
+const KEY='stk_v1',VER='2.0';
+let D={articles:[],mvts:[],devise:''},tab='home',sel=null,q='',bf={nom:'',cat:'Chaussures',pt:'',q:1,p:''},locked=false,ck=null,salt=null,sq=Promise.resolve(),inst=null;
+const rawGet=()=>{try{return JSON.parse(localStorage.getItem(KEY)||'null')}catch(e){return null}};
+{const r=rawGet();if(r&&r.enc)locked=true;else if(r)D=r}
+function save(){sq=sq.then(async()=>{if(locked)return;try{localStorage.setItem(KEY,JSON.stringify(ck?await encr(ck,salt,D):D))}catch(e){alert('Sauvegarde impossible sur cet appareil')}})}
+const $=s=>document.querySelector(s);
+const esc=s=>String(s).replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
+const fmt=n=>Math.round(n).toLocaleString('fr-FR')+(D.devise?' '+D.devise:'');
+const uid=()=>Date.now().toString(36)+Math.random().toString(36).slice(2,5);
+const sum=(a,f)=>a.reduce((t,x)=>t+f(x),0);
+const dt=t=>new Date(t).toLocaleString('fr-FR',{day:'2-digit',month:'2-digit',hour:'2-digit',minute:'2-digit'});
+const dayOf=t=>new Date(t).toLocaleDateString('sv');
+let tt;function toast(m){const e=$('#toast');e.textContent=m;e.classList.add('on');clearTimeout(tt);tt=setTimeout(()=>e.classList.remove('on'),2200)}
+
+function stats(){
+  const now=Date.now(),L=30*864e5,R={};
+  D.articles.forEach(a=>R[a.id]={a,s:0,qa:0,va:0,q30:0,ca:0,b:0,last:0,first:0});
+  D.mvts.forEach(x=>{const r=R[x.aid];if(!r)return;
+    if(x.type==='achat'){r.s+=x.q;r.qa+=x.q;r.va+=x.q*x.p;if(!r.first||x.t<r.first)r.first=x.t}
+    else{r.s-=x.q;if(x.t>r.last)r.last=x.t;r.lp=x.p;if(now-x.t<=L){r.q30+=x.q;r.ca+=x.q*x.p;r.b+=x.q*(x.p-x.c)}}
+  });
+  Object.values(R).forEach(r=>r.cm=r.qa?r.va/r.qa:0);
+  return R;
+}
+function go(t){tab=t;q='';sel=null;render();scrollTo(0,0)}
+function render(){
+  if(locked)return lockScreen();
+  $('nav').style.display='flex';
+  document.querySelectorAll('nav button').forEach(b=>b.classList.toggle('on',b.dataset.t===tab));
+  $('#v').innerHTML=({home:pHome,buy:pBuy,sell:pSell,stock:pStock,more:pMore})[tab]();
+  if(tab==='sell')vlist();if(tab==='stock')tlist();
+}
+
+/* ACCUEIL */
+function pHome(){
+  const R=Object.values(stats()),now=Date.now(),L=30*864e5,td=dayOf(now);
+  if(!D.mvts.length)return '<h2>Bienvenue</h2><div class="card">Commence par l’onglet <b>Achat</b> pour enregistrer la marchandise reçue. Ensuite, note chaque sortie dans l’onglet <b>Vente</b> : le stock et les statistiques se calculent tout seuls.</div>';
+  const vt=D.mvts.filter(x=>x.type==='vente'&&dayOf(x.t)===td);
+  const M={};R.forEach(r=>{const m=M[r.a.nom]=M[r.a.nom]||{n:r.a.nom,q:0,ca:0,b:0};m.q+=r.q30;m.ca+=r.ca;m.b+=r.b});
+  const top=Object.values(M).filter(m=>m.q>0).sort((a,b)=>b.q-a.q).slice(0,5);
+  const P={};R.forEach(r=>{if(r.q30)P[r.a.pt]=(P[r.a.pt]||0)+r.q30});
+  const tp=Object.entries(P).sort((a,b)=>b[1]-a[1]).slice(0,5);
+  const dl=r=>r.s/(r.q30/30);
+  const rea=R.filter(r=>r.q30>0&&dl(r)<7).sort((a,b)=>dl(a)-dl(b)).slice(0,8);
+  const dor=R.filter(r=>r.s>0&&now-(r.last||r.first)>L).sort((a,b)=>b.s*b.cm-a.s*a.cm).slice(0,8);
+  const li=(a,b,c)=>`<div class="it"><div>${a}</div><span class="${c||''}">${b}</span></div>`;
+  const k=(a,b)=>`<div class="k"><small>${a}</small><b>${b}</b></div>`;
+  const lb=D.lastBackup,old=!lb||now-lb>7*864e5,safe=window.crypto&&crypto.subtle&&!ck;
+  const warn=(old?`<div class="card"><b class="rd">⚠️ Sauvegarde ${lb?'datant de '+Math.floor((now-lb)/864e5)+' jours':'jamais faite'}</b><button class="btn" onclick="shareBackup()">Envoyer la sauvegarde par WhatsApp</button></div>`:'')+(safe?'<div class="card">🔒 Protège tes données : active le code secret dans l’onglet <b>Plus</b>.</div>':'');
+  return `${warn}<h2>Aujourd’hui</h2><div class="grid">${k('Ventes du jour',fmt(sum(vt,x=>x.q*x.p)))}${k('Bénéfice du jour',fmt(sum(vt,x=>x.q*(x.p-x.c))))}</div>
+  <h2>30 derniers jours</h2><div class="grid">${k('Chiffre d’affaires',fmt(sum(R,r=>r.ca)))}${k('Bénéfice',fmt(sum(R,r=>r.b)))}${k('Pièces en stock',sum(R,r=>r.s))}${k('Valeur du stock',fmt(sum(R,r=>r.s*r.cm)))}</div>
+  <h2>🔥 Ce qui se vend le mieux</h2>${top.map(m=>li(`<b>${esc(m.n)}</b><br><small class="mu">bénéfice ${fmt(m.b)} · marge ${m.ca?Math.round(m.b/m.ca*100):0} %</small>`,m.q+' vendus')).join('')||'<p class="mu">Pas encore de ventes.</p>'}
+  <h2>👟 Pointures les plus demandées</h2>${tp.map(p=>li('Pointure '+esc(p[0]),p[1]+' vendues')).join('')||'<p class="mu">—</p>'}
+  <h2>🛒 À racheter en priorité</h2><p class="mu"><small>Articles qui seront épuisés dans moins de 7 jours au rythme actuel.</small></p>${rea.map(r=>li(`<b>${esc(r.a.nom)}</b> · P${esc(r.a.pt)}<br><small class="mu">coût moyen ${fmt(r.cm)}</small>`,r.s?'reste '+r.s+' (~'+Math.max(1,Math.round(dl(r)))+' j)':'épuisé','rd')).join('')||'<p class="mu">Rien d’urgent.</p>'}
+  <h2>🐌 Stock dormant (30 jours sans vente)</h2><p class="mu"><small>Argent immobilisé : pense à solder ou à ne pas racheter.</small></p>${dor.map(r=>li(`<b>${esc(r.a.nom)}</b> · P${esc(r.a.pt)}`,r.s+' · '+fmt(r.s*r.cm))).join('')||'<p class="mu">Aucun.</p>'}<button class="btn alt" onclick="shareBilan()">📤 Envoyer le bilan par WhatsApp</button>`;
+}
+
+/* ACHAT */
+function pBuy(){
+  const noms=[...new Set(D.articles.map(a=>a.nom))];
+  return `<h2>Enregistrer un achat</h2><div class="card">
+  <label>Modèle / nom</label><input id="bn" list="nl" value="${esc(bf.nom)}" placeholder="ex : Puma noire" autocomplete="off">
+  <datalist id="nl">${noms.map(n=>`<option value="${esc(n)}">`).join('')}</datalist>
+  <label>Type</label><select id="bc">${['Chaussures','Babouches','Autre'].map(c=>`<option ${c===bf.cat?'selected':''}>${c}</option>`).join('')}</select>
+  <div class="row"><div><label>Pointure</label><input id="bp" value="${esc(bf.pt)}"></div>
+  <div><label>Quantité</label><input id="bq" type="number" inputmode="numeric" value="${bf.q}"></div></div>
+  <label>Prix d’achat (par paire)</label><input id="bx" type="number" inputmode="decimal" value="${bf.p}">
+  <button class="btn" onclick="saveBuy()">Enregistrer l’achat</button></div>`;
+}
+function saveBuy(){
+  const nom=$('#bn').value.trim(),cat=$('#bc').value,pt=$('#bp').value.trim(),n=+$('#bq').value,p=+$('#bx').value;
+  if(!nom||!pt||!(n>0)||$('#bx').value===''||p<0)return toast('Remplis tous les champs');
+  let a=D.articles.find(a=>a.nom.toLowerCase()===nom.toLowerCase()&&a.cat===cat&&a.pt===pt);
+  if(!a){a={id:uid(),nom,cat,pt};D.articles.push(a)}
+  D.mvts.push({id:uid(),t:Date.now(),type:'achat',aid:a.id,q:n,p});
+  save();bf={nom,cat,pt:'',q:1,p};render();toast('Achat enregistré ✓');
+}
+
+/* VENTE */
+function pSell(){return `<h2>Enregistrer une vente</h2><div id="vf"></div><input placeholder="Chercher un article…" oninput="q=this.value;vlist()" value="${esc(q)}" style="margin-bottom:8px"><div id="vl"></div>`}
+function vlist(){
+  const R=Object.values(stats()).filter(r=>r.s>0&&(r.a.nom+' '+r.a.pt).toLowerCase().includes(q.toLowerCase())).sort((a,b)=>a.a.nom.localeCompare(b.a.nom));
+  $('#vl').innerHTML=R.slice(0,40).map(r=>`<div class="it ${sel===r.a.id?'sel':''}" onclick="pick('${r.a.id}')"><div><b>${esc(r.a.nom)}</b> · P${esc(r.a.pt)}</div><span>${r.s} en stock</span></div>`).join('')||'<p class="mu">Aucun article en stock.</p>';
+}
+function pick(id){
+  sel=id;vlist();const r=stats()[id];
+  $('#vf').innerHTML=`<div class="card"><b>${esc(r.a.nom)}</b> · P${esc(r.a.pt)} <small class="mu">(coût moyen ${fmt(r.cm)})</small>
+  <div class="row"><div><label>Quantité</label><input id="vq" type="number" inputmode="numeric" value="1"></div>
+  <div><label>Prix de vente</label><input id="vp" type="number" inputmode="decimal" value="${r.lp||''}"></div></div>
+  <button class="btn" onclick="saveSell()">Valider la vente</button></div>`;
+  scrollTo(0,0);
+}
+function saveSell(){
+  const r=sel&&stats()[sel],n=+$('#vq').value,p=+$('#vp').value;
+  if(!r||!(n>0)||$('#vp').value===''||p<0)return toast('Quantité et prix requis');
+  if(n>r.s)return toast('Stock insuffisant ('+r.s+')');
+  D.mvts.push({id:uid(),t:Date.now(),type:'vente',aid:sel,q:n,p,c:r.cm});
+  save();sel=null;q='';render();toast('Vente ✓ bénéfice '+fmt(n*(p-r.cm)));
+}
+
+/* STOCK */
+function pStock(){return `<h2>Stock</h2><div class="card" id="ts"></div><input placeholder="Chercher…" oninput="q=this.value;tlist()" style="margin-bottom:8px"><div id="tl"></div>`}
+function tlist(){
+  const all=Object.values(stats());
+  $('#ts').innerHTML=`<b>${sum(all,r=>r.s)}</b> pièces · valeur au coût <b>${fmt(sum(all,r=>r.s*r.cm))}</b>`;
+  const R=all.filter(r=>(r.a.nom+' '+r.a.pt).toLowerCase().includes(q.toLowerCase())).sort((a,b)=>(b.s>0)-(a.s>0)||a.a.nom.localeCompare(b.a.nom));
+  $('#tl').innerHTML=R.map(r=>`<div class="it ${r.s<=0?'off':''}"><div><b>${esc(r.a.nom)}</b> · P${esc(r.a.pt)}<br><small class="mu">${esc(r.a.cat)} · coût ${fmt(r.cm)}</small></div><span>${r.s>0?r.s:'épuisé'}</span></div>`).join('')||'<p class="mu">Rien pour le moment.</p>';
+}
+
+/*CRYPTO*/
+const te=new TextEncoder(),tdc=new TextDecoder();
+const b64=b=>{let s='';const u=new Uint8Array(b);for(let i=0;i<u.length;i+=8192)s+=String.fromCharCode.apply(null,u.subarray(i,i+8192));return btoa(s)};
+const ub=s=>Uint8Array.from(atob(s),c=>c.charCodeAt(0));
+async function dk(pin,salt){const k=await crypto.subtle.importKey('raw',te.encode(pin),'PBKDF2',false,['deriveKey']);return crypto.subtle.deriveKey({name:'PBKDF2',salt,iterations:200000,hash:'SHA-256'},k,{name:'AES-GCM',length:256},false,['encrypt','decrypt'])}
+async function encr(key,salt,obj){const iv=crypto.getRandomValues(new Uint8Array(12));const ct=await crypto.subtle.encrypt({name:'AES-GCM',iv},key,te.encode(JSON.stringify(obj)));return{enc:1,s:b64(salt),iv:b64(iv),ct:b64(ct)}}
+async function decr(key,o){const p=await crypto.subtle.decrypt({name:'AES-GCM',iv:ub(o.iv)},key,ub(o.ct));return JSON.parse(tdc.decode(p))}
+/*END*/
+
+/* VERROUILLAGE */
+function lockScreen(){
+  $('nav').style.display='none';
+  $('#v').innerHTML=`<h2>🔒 Stock Boutique</h2><div class="card"><label>Code secret</label><input id="pin" type="password" inputmode="numeric" autocomplete="off" onkeydown="if(event.key==='Enter')unlock()"><button class="btn" onclick="unlock()">Ouvrir</button></div>`;
+}
+async function unlock(){
+  const r=rawGet(),pin=$('#pin').value;
+  try{const k=await dk(pin,ub(r.s));D=await decr(k,r);ck=k;salt=ub(r.s);locked=false;render();arm()}
+  catch(e){toast('Code incorrect');$('#pin').value=''}
+}
+function lockNow(){sq=sq.then(()=>{if(!ck)return;D={articles:[],mvts:[],devise:''};ck=null;salt=null;locked=true;render()})}
+let idle,away=0;
+function arm(){clearTimeout(idle);if(ck)idle=setTimeout(lockNow,12e4)}
+['click','keydown','touchstart'].forEach(e=>addEventListener(e,arm,{passive:true}));
+document.addEventListener('visibilitychange',()=>{if(document.hidden)away=Date.now();else if(ck&&away&&Date.now()-away>6e4)lockNow()});
+async function setPin(){
+  const a=$('#np').value,b=$('#np2').value;
+  if(a.length<6)return toast('6 caractères minimum');
+  if(a!==b)return toast('Les deux codes sont différents');
+  salt=crypto.getRandomValues(new Uint8Array(16));ck=await dk(a,salt);save();arm();render();toast('Code activé 🔒');
+}
+function noPin(){if(confirm('Désactiver le code ? Les données ne seront plus chiffrées.')){ck=null;salt=null;save();render()}}
+
+/* PLUS */
+function pMore(){
+  const A=Object.fromEntries(D.articles.map(a=>[a.id,a])),L=[...D.mvts].sort((a,b)=>b.t-a.t).slice(0,40);
+  const secure=window.crypto&&crypto.subtle,app=matchMedia('(display-mode: standalone)').matches;
+  const sec=ck?`<p class="mu" style="margin-top:0">Code actif : données et sauvegardes chiffrées. Verrouillage automatique après 2 minutes d’inactivité.</p><button class="btn" onclick="lockNow()">Verrouiller maintenant</button><button class="btn alt" onclick="noPin()">Désactiver le code</button>`
+    :secure?`<label>Nouveau code (6 caractères minimum)</label><input id="np" type="password" inputmode="numeric" autocomplete="off"><label>Confirmer le code</label><input id="np2" type="password" inputmode="numeric" autocomplete="off"><button class="btn" onclick="setPin()">Activer le code</button><p class="mu"><small>⚠️ Note ce code en lieu sûr : s’il est oublié, les données sont irrécupérables.</small></p>`
+    :'<p class="mu" style="margin:0">Le code secret ne marche que si l’application est ouverte depuis son adresse https (voir Aide).</p>';
+  return `<h2>📲 Installer l’application</h2><div class="card">${inst?'<button class="btn" style="margin:0" onclick="doInstall()">Installer sur l’écran d’accueil</button>':'<p class="mu" style="margin:0">'+(app?'✓ Application installée.':'Dans Chrome : menu ⋮ puis « Installer l’application ».')+'</p>'}</div>
+  <h2>🔒 Sécurité</h2><div class="card">${sec}</div>
+  <h2>📤 Sauvegarde et WhatsApp</h2><div class="card"><p class="mu" style="margin-top:0">Les données sont sur ce téléphone. Envoie une sauvegarde chaque semaine.</p>
+  <button class="btn" style="margin-top:0" onclick="shareBackup()">Envoyer la sauvegarde par WhatsApp</button>
+  <button class="btn alt" onclick="exp()">Télécharger la sauvegarde</button>
+  <button class="btn alt" onclick="csv()">Exporter en CSV (Excel)</button>
+  <button class="btn alt" onclick="$('#imp').click()">Restaurer une sauvegarde</button>
+  <input id="imp" type="file" hidden onchange="imp(this)">
+  <label>Devise affichée avec les montants</label><input value="${esc(D.devise||'')}" oninput="D.devise=this.value;save()" placeholder="ex : FCFA"></div>
+  <h2>❓ Aide</h2>
+  <details class="card"><summary><b>Comment ça marche sans internet ?</b></summary><p class="mu">Après la première ouverture avec internet, l’application est mémorisée dans le téléphone et marche ensuite sans connexion. Tout est enregistré sur l’appareil.</p></details>
+  <details class="card"><summary><b>Comment envoyer les données sur WhatsApp ?</b></summary><p class="mu">Touche « Envoyer la sauvegarde » ou « Envoyer le bilan » (Accueil), puis choisis WhatsApp. Sans réseau, WhatsApp garde le message et l’envoie dès que la connexion revient. L’envoi est manuel : aucune donnée ne part toute seule.</p></details>
+  <details class="card"><summary><b>Comment protéger les données ?</b></summary><p class="mu">Active le code secret : les données sont chiffrées sur le téléphone et l’application se verrouille seule. Fais aussi une sauvegarde chaque semaine, car vider les données de Chrome efface tout.</p></details>
+  <p class="mu"><small>Version ${VER}</small></p><h2>Historique</h2>${L.map(x=>{const a=A[x.aid]||{nom:'?',pt:''};return `<div class="it"><div><b>${x.type==='achat'?'Achat':'Vente'}</b> ${x.q} × ${esc(a.nom)} P${esc(a.pt)}<br><small class="mu">${dt(x.t)} · ${fmt(x.p)}</small></div><button class="x" onclick="undo('${x.id}')">Annuler</button></div>`}).join('')||'<p class="mu">Aucun mouvement.</p>'}`;
+}
+function dl(name,txt,type){const a=document.createElement('a');a.href=URL.createObjectURL(new Blob([txt],{type}));a.download=name;a.click()}
+async function packed(){return ck?await encr(ck,salt,D):D}
+async function exp(){dl('stock-'+dayOf(Date.now())+'.json',JSON.stringify(await packed()),'application/json');D.lastBackup=Date.now();save()}
+async function shareBackup(){
+  const f=new File([JSON.stringify(await packed())],'sauvegarde-stock-'+dayOf(Date.now())+'.txt',{type:'text/plain'});
+  if(navigator.canShare&&navigator.canShare({files:[f]})){try{await navigator.share({files:[f],title:'Sauvegarde stock'});D.lastBackup=Date.now();save();return}catch(e){if(e.name==='AbortError')return}}
+  exp();toast('Fichier téléchargé : joins-le dans WhatsApp');
+}
+function bilan(){
+  const R=Object.values(stats()),vt=D.mvts.filter(x=>x.type==='vente'&&dayOf(x.t)===dayOf(Date.now()));
+  const rea=R.filter(r=>r.q30>0&&r.s/(r.q30/30)<7).slice(0,5).map(r=>'• '+r.a.nom+' P'+r.a.pt+' (reste '+r.s+')');
+  return `📊 Bilan du ${new Date().toLocaleDateString('fr-FR')}\nVentes : ${fmt(sum(vt,x=>x.q*x.p))}\nBénéfice : ${fmt(sum(vt,x=>x.q*(x.p-x.c)))}\nEn stock : ${sum(R,r=>r.s)} pièces (${fmt(sum(R,r=>r.s*r.cm))})`+(rea.length?'\n\n🛒 À racheter :\n'+rea.join('\n'):'');
+}
+function shareBilan(){const t=bilan();if(navigator.share)navigator.share({text:t}).catch(()=>{});else location.href='whatsapp://send?text='+encodeURIComponent(t)}
+function csv(){
+  const A=Object.fromEntries(D.articles.map(a=>[a.id,a])),rows=[['date','type','article','categorie','pointure','quantite','prix','cout']];
+  D.mvts.forEach(x=>{const a=A[x.aid]||{};rows.push([dayOf(x.t),x.type,a.nom,a.cat,a.pt,x.q,x.p,x.c??''])});
+  dl('mouvements.csv','\ufeff'+rows.map(r=>r.join(';')).join('\n'),'text/csv');
+}
+function imp(el){
+  const f=el.files[0];if(!f)return;const rd=new FileReader();
+  rd.onload=async()=>{try{let d=JSON.parse(rd.result);
+    if(d.enc){const p=prompt('Code de cette sauvegarde :');if(!p)return;d=await decr(await dk(p,ub(d.s)),d)}
+    if(!d.articles||!d.mvts)throw 0;
+    if(confirm('Remplacer les données actuelles par cette sauvegarde ?')){D=d;save();render();toast('Sauvegarde restaurée ✓')}}
+    catch(e){toast('Fichier ou code invalide')}};
+  rd.readAsText(f);el.value='';
+}
+function undo(id){
+  const x=D.mvts.find(m=>m.id===id);if(!x)return;
+  if(x.type==='achat'&&stats()[x.aid].s-x.q<0)return toast('Impossible : ces paires sont déjà vendues');
+  if(!confirm('Annuler ce mouvement ?'))return;
+  D.mvts=D.mvts.filter(m=>m.id!==id);save();render();
+}
+
+/* INSTALLATION + HORS LIGNE */
+addEventListener('beforeinstallprompt',e=>{e.preventDefault();inst=e;if(tab==='more'&&!locked)render()});
+async function doInstall(){if(!inst)return;inst.prompt();await inst.userChoice;inst=null;render()}
+if('serviceWorker' in navigator&&location.protocol.startsWith('http')){
+  const had=navigator.serviceWorker.controller;
+  navigator.serviceWorker.addEventListener('controllerchange',()=>{if(had)toast('Mise à jour installée : ferme et rouvre l’application')});
+  navigator.serviceWorker.register('sw.js').catch(()=>{});
+}
+if(navigator.storage&&navigator.storage.persist)navigator.storage.persist().catch(()=>{});
+render();
+</script></body></html>
